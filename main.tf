@@ -66,7 +66,7 @@ resource "aws_apigatewayv2_api" "this" {
   protocol_type = "HTTP"
   cors_configuration {
     allow_origins  = ["http://localhost:8000"]
-    allow_methods  = ["GET"]
+    allow_methods  = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]
     allow_headers  = ["authorization"]
     expose_headers = ["apigw-requestid"]
     max_age        = 300
@@ -94,7 +94,7 @@ resource "aws_apigatewayv2_authorizer" "google" {
 
 resource "aws_apigatewayv2_route" "private" {
   api_id             = aws_apigatewayv2_api.this.id
-  route_key          = "GET /private"
+  route_key          = "ANY /{proxy+}"
   authorization_type = "CUSTOM"
   authorizer_id      = aws_apigatewayv2_authorizer.google.id
   target             = "integrations/${aws_apigatewayv2_integration.lambda.id}"
@@ -205,10 +205,10 @@ resource "aws_lambda_permission" "secondary" {
 }
 
 resource "aws_lambda_permission" "primary" {
-  statement_id   = "Allow-private"
+  statement_id   = "Allow-primary-routes"
   action         = "lambda:InvokeFunction"
   function_name  = aws_lambda_function.this.function_name
   principal      = "apigateway.amazonaws.com"
-  source_arn     = "${aws_apigatewayv2_api.this.execution_arn}/*/GET/private"
+  source_arn     = "${aws_apigatewayv2_api.this.execution_arn}/*/*/*"
   source_account = var.aws_account_id
 }

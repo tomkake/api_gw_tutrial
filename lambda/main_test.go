@@ -63,7 +63,7 @@ func TestGoogleTokenAuthorization(t *testing.T) {
 	t.Setenv("GOOGLE_CLIENT_ID", "test-client")
 	t.Setenv("ALLOWED_EMAIL", "allowed@example.invalid")
 	a, sign := signedFixture(t)
-	for _, route := range []string{"GET /private", "GET /secondary"} {
+	for _, route := range []string{"ANY /{proxy+}", "GET /secondary"} {
 		response, err := a.handle(context.Background(), authEvent(sign(validClaims()), route))
 		if err != nil || !response.IsAuthorized {
 			t.Fatalf("valid token denied: %v", err)
@@ -100,9 +100,11 @@ func TestGoogleTokenAuthorization(t *testing.T) {
 		parts[2] = "A" + parts[2][1:]
 	}
 	for _, bad := range []string{"not-a-jwt", strings.Join(parts, ".")} {
-		response, err := a.handle(context.Background(), authEvent(bad, "GET /secondary"))
-		if err != nil || response.IsAuthorized {
-			t.Fatal("invalid signature/token allowed")
+		for _, route := range []string{"ANY /{proxy+}", "GET /secondary"} {
+			response, err := a.handle(context.Background(), authEvent(bad, route))
+			if err != nil || response.IsAuthorized {
+				t.Fatal("invalid signature/token allowed")
+			}
 		}
 	}
 	_, attackerSign := signedFixture(t)
@@ -139,7 +141,7 @@ func TestDispatchAuthorizerAndPrivateEndpoint(t *testing.T) {
 	t.Setenv("GOOGLE_CLIENT_ID", "test-client")
 	t.Setenv("ALLOWED_EMAIL", "allowed@example.invalid")
 	a, sign := signedFixture(t)
-	raw, _ := json.Marshal(authEvent(sign(validClaims()), "GET /private"))
+	raw, _ := json.Marshal(authEvent(sign(validClaims()), "ANY /{proxy+}"))
 	result, err := a.dispatch(context.Background(), raw)
 	if err != nil {
 		t.Fatal(err)
@@ -148,8 +150,9 @@ func TestDispatchAuthorizerAndPrivateEndpoint(t *testing.T) {
 	if !ok || !decision.IsAuthorized {
 		t.Fatal("authorizer dispatch failed")
 	}
-	event := events.APIGatewayV2HTTPRequest{Version: "2.0", RouteKey: "GET /private",
+	event := events.APIGatewayV2HTTPRequest{Version: "2.0", RouteKey: "ANY /{proxy+}",
 		RequestContext: events.APIGatewayV2HTTPRequestContext{RequestID: "example-request",
+			HTTP:       events.APIGatewayV2HTTPRequestContextHTTPDescription{Method: "GET", Path: "/private"},
 			Authorizer: &events.APIGatewayV2HTTPRequestContextAuthorizerDescription{Lambda: decision.Context}}}
 	raw, _ = json.Marshal(event)
 	result, err = a.dispatch(context.Background(), raw)
@@ -170,6 +173,26 @@ func TestDispatchAuthorizerAndPrivateEndpoint(t *testing.T) {
 		if err != nil || response.StatusCode != 403 {
 			t.Fatal("endpoint accepted missing/denied authorizer decision")
 		}
+	}
+	event.RequestContext.Authorizer = &events.APIGatewayV2HTTPRequestContextAuthorizerDescription{Lambda: decision.Context}
+	for _, request := range []events.APIGatewayV2HTTPRequestContextHTTPDescription{
+		{Method: "GET", Path: "/hello"},
+		{Method: "GET", Path: "/admin/users"},
+		{Method: "POST", Path: "/private"},
+		{Method: "GET", Path: "/secondary"},
+	} {
+		event.RequestContext.HTTP = request
+		response, err := businessHandler(event)
+		if err != nil || response.StatusCode != 404 {
+			t.Fatalf("unimplemented request accepted: %s %s", request.Method, request.Path)
+		}
+		// Even unknown wildcard paths must not bypass authentication.
+		event.RequestContext.Authorizer = nil
+		response, err = businessHandler(event)
+		if err != nil || response.StatusCode != 403 {
+			t.Fatal("wildcard request accepted without authorization")
+		}
+		event.RequestContext.Authorizer = &events.APIGatewayV2HTTPRequestContextAuthorizerDescription{Lambda: decision.Context}
 	}
 	event.RouteKey = "GET /secondary"
 	response, err = businessHandler(event)

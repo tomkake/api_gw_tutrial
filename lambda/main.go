@@ -31,7 +31,7 @@ func (a authorizer) handle(ctx context.Context, event events.APIGatewayV2CustomA
 	if clientID == "" || allowedEmail == "" {
 		return response, errors.New("authorizer configuration missing")
 	}
-	if event.Type != "REQUEST" || event.Version != "2.0" || (event.RouteKey != "GET /private" && event.RouteKey != "GET /secondary") {
+	if event.Type != "REQUEST" || event.Version != "2.0" || (event.RouteKey != "ANY /{proxy+}" && event.RouteKey != "GET /secondary") {
 		return response, nil
 	}
 	var header string
@@ -72,7 +72,7 @@ func (a authorizer) handle(ctx context.Context, event events.APIGatewayV2CustomA
 	return response, nil
 }
 
-// API Gateway invokes this function in two roles: authorizer and /private integration.
+// API Gateway invokes this function in two roles: authorizer and wildcard integration.
 func (a authorizer) dispatch(ctx context.Context, raw json.RawMessage) (any, error) {
 	var envelope struct {
 		Type string `json:"type"`
@@ -103,12 +103,16 @@ func businessHandler(event events.APIGatewayV2HTTPRequest) (events.APIGatewayV2H
 	status := 200
 	body := map[string]string{"message": "Hello from the first Lambda!", "request_id": event.RequestContext.RequestID}
 	switch {
-	case event.Version != "2.0" || event.RouteKey != "GET /private":
+	case event.Version != "2.0" || event.RouteKey != "ANY /{proxy+}":
 		status = 404
 		body = map[string]string{"message": "not found"}
 	case event.RequestContext.Authorizer == nil || event.RequestContext.Authorizer.Lambda["authorized"] != true:
 		status = 403
 		body = map[string]string{"message": "forbidden"}
+	// Match actual method/path: RouteKey is the same for every wildcard request.
+	case event.RequestContext.HTTP.Method != "GET" || event.RequestContext.HTTP.Path != "/private":
+		status = 404
+		body = map[string]string{"message": "not found"}
 	}
 	encoded, err := json.Marshal(body)
 	return events.APIGatewayV2HTTPResponse{StatusCode: status, Headers: map[string]string{"content-type": "application/json", "cache-control": "no-store"}, Body: string(encoded)}, err

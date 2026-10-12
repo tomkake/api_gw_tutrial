@@ -13,7 +13,7 @@ API Gateway HTTP API
    |    Google の署名・issuer・audience・有効時刻・許可メールを検査
    |    ├ 拒否 → API Gateway が403、Lambda 2 は呼ばない
    |    └ 許可
-   +→ GET /private   → Lambda 1（業務処理）
+   +→ ANY /{proxy+}  → Lambda 1（業務処理。現在は GET /private のみ実装）
    └→ GET /secondary → Lambda 2（業務処理）
    どちらもメッセージと request ID を返す
 ```
@@ -44,9 +44,21 @@ Lambda Authorizer は payload 2.0 の simple response で許可・拒否を返�
 }
 ```
 
-2つ目に Lambda Function URL や認証なし route は作成しません。Lambda の resource policy は、このアカウントのこの API Gateway の `GET /secondary` からの呼出しだけを許可します。1つ目の resource policy は、この API の authorizer と `GET /private` からの呼出しだけを許可します。実行 role は各関数自身の log stream の作成・書込みだけを許可し、関数同士を直接呼ぶ権限は付与しません。
+2つ目に Lambda Function URL や認証なし route は作成しません。Lambda の resource policy は、このアカウントのこの API Gateway の `GET /secondary` からの呼出しだけを許可します。1つ目の resource policy は、このアカウントのこの API の authorizer と全メソッド・パスからの呼出しを許可します。ワイルドカードルートにも認証を必須にしています。実行 role は各関数自身の log stream の作成・書込みだけを許可し、関数同士を直接呼ぶ権限は付与しません。
 
 これは一般の API 利用者向けの入口を API Gateway に限定する設定です。AWS IAM で別途 `lambda:InvokeFunction` を持つ管理者等による直接呼出しは別の権限経路です。API 利用者にはその IAM 権限を付与しないでください。
+
+## ワイルドカードルートとエンドポイントの追加
+
+API Gateway は認証必須の `ANY /{proxy+}` を Lambda 1 に接続します。具体的な `GET /secondary` はワイルドカードより優先され、同じ認証を経由して Lambda 2 に接続します。ルート `/` はこのワイルドカードの対象外です。
+
+今後 `GET /hello` などを追加するときは、`lambda/main.go` の `businessHandler` に HTTP メソッドとパスに応じた処理を追加します。同じ Lambda 1 に接続する限り、API Gateway のルート追加は不要です。`event.RouteKey` はすべて `ANY /{proxy+}` になるので、実際の振り分けには `event.RequestContext.HTTP.Method` と `event.RequestContext.HTTP.Path` を使います。現在は `GET /private` のみ実装し、認証済みでも未実装パス・メソッドは404を返します。
+
+認証用の `/auth` エンドポイントは不要です。API Gateway は `authorizer_uri` に指定した Lambda を直接呼び、`type=REQUEST` のイベントを渡します。同じ Lambda はこのイベントを認証処理に振り分け、通常の HTTP API イベントを業務処理に振り分けます。リクエスト本文に `type` を書いても、このイベント種別は変更できません。
+
+ワイルドカード化により、Lambda に追加した業務ルートは API Gateway の個別設定なしで公開対象になります。管理用ルートなどを追加する際は、Lambda 側で権限をチェックしてください。現在は許可メールの利用者がすべての実装済みルートを利用できる設計です。また、未知のパスも認証処理へ届くため、不正トークン付きの大量リクエストによる呼び出しコストが増える可能性があります。認証結果キャッシュは引き続き無効です。
+
+`make serve` は引き続き `/` と `/config.json` の配信のみを行います。ローカル `/hello` の転送処理はありません。業務 API は設定された AWS API Gateway URL に JWT を付けてリクエストします。CORS は localhost の指定を維持し、一般的な HTTP メソッドを許可していますが、実行可否は認証と業務ハンドラーが判定します。
 
 ## 準備
 
@@ -111,7 +123,7 @@ plan の変更内容と対象アカウントを確認してから適用します
 
 表示する claims は `iss`、`aud`、`sub`、`email`、`email_verified`、`iat`、`exp` です。ブラウザの表示用デコードは認証判断ではありません。認証・認可の最終判断は Lambda 1 が行います。業務応答には claims を含めません。token はページのメモリに保持し、localStorage/cookie に保存しません。コピー後のクリップボードは検証後に消去します。
 
-CORS は API Gateway が `http://localhost:8000` の GET と Authorization header を許可します。OPTIONS は API Gateway が応答します。[AWS HTTP API CORS](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api-cors.html)
+CORS は API Gateway が `http://localhost:8000` の GET / POST / PUT / PATCH / DELETE / HEAD / OPTIONS と Authorization header を許可します。OPTIONS は API Gateway が応答します。[AWS HTTP API CORS](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api-cors.html)
 
 ## 実環境検証
 

@@ -45,7 +45,7 @@ run "secondary_routing" {
     error_message = "Invoke permission must be limited to the secondary GET route."
   }
   assert {
-    condition     = aws_apigatewayv2_route.private.target == "integrations/${aws_apigatewayv2_integration.lambda.id}" && aws_apigatewayv2_integration.lambda.integration_uri == aws_lambda_function.this.invoke_arn && aws_apigatewayv2_route.private.authorization_type == "CUSTOM" && aws_apigatewayv2_route.private.authorizer_id == aws_apigatewayv2_authorizer.google.id
+    condition     = aws_apigatewayv2_route.private.route_key == "ANY /{proxy+}" && aws_apigatewayv2_route.private.target == "integrations/${aws_apigatewayv2_integration.lambda.id}" && aws_apigatewayv2_integration.lambda.integration_uri == aws_lambda_function.this.invoke_arn && aws_apigatewayv2_route.private.authorization_type == "CUSTOM" && aws_apigatewayv2_route.private.authorizer_id == aws_apigatewayv2_authorizer.google.id
     error_message = "Both routes must use the authorizer and /private must invoke the first Lambda integration."
   }
   assert {
@@ -53,8 +53,8 @@ run "secondary_routing" {
     error_message = "Authentication and authorization must be delegated only to the first Lambda, with decision caching disabled."
   }
   assert {
-    condition     = aws_lambda_permission.authorizer.principal == "apigateway.amazonaws.com" && aws_lambda_permission.authorizer.source_arn == "${aws_apigatewayv2_api.this.execution_arn}/authorizers/${aws_apigatewayv2_authorizer.google.id}" && aws_lambda_permission.secondary.principal == "apigateway.amazonaws.com" && aws_lambda_permission.secondary.source_account == var.aws_account_id && aws_lambda_permission.primary.function_name == aws_lambda_function.this.function_name && aws_lambda_permission.primary.principal == "apigateway.amazonaws.com" && aws_lambda_permission.primary.source_account == var.aws_account_id && aws_lambda_permission.primary.source_arn == "${aws_apigatewayv2_api.this.execution_arn}/*/GET/private"
-    error_message = "Resource permissions must allow only this API's authorizer and two GET routes."
+    condition     = aws_lambda_permission.authorizer.principal == "apigateway.amazonaws.com" && aws_lambda_permission.authorizer.source_arn == "${aws_apigatewayv2_api.this.execution_arn}/authorizers/${aws_apigatewayv2_authorizer.google.id}" && aws_lambda_permission.secondary.principal == "apigateway.amazonaws.com" && aws_lambda_permission.secondary.source_account == var.aws_account_id && aws_lambda_permission.primary.function_name == aws_lambda_function.this.function_name && aws_lambda_permission.primary.principal == "apigateway.amazonaws.com" && aws_lambda_permission.primary.source_account == var.aws_account_id && aws_lambda_permission.primary.source_arn == "${aws_apigatewayv2_api.this.execution_arn}/*/*/*"
+    error_message = "Resource permissions must be scoped to this API/account, with primary wildcard and secondary GET permissions."
   }
 
 }
