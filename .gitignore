@@ -1,0 +1,44 @@
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.tfvars
+*.tfvars.json
+!terraform.tfvars.example
+.build/
+.env
+.env.*
+!.env.example
+*.log
+__pycache__/
+crash.log
+crash.*.log
+
+# Local verification notes and exported deployment data
+/VERIFICATION.md
+/config.json
+/outputs.json
+/terraform-output*.json
+/verification*.json
+
+# Credentials, private keys and local tool configuration
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+credentials
+credentials.*.json
+client_secret*.json
+service-account*.json
+.aws/
+.ssh/
+.vscode/
+.idea/
+
+# Build archives and local backups
+*.zip
+*.bak
+*.swp
+.DS_Store

@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="ja">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Google Sign-In + Lambda Authorizer PoC</title>
+<style>
+body { font-family: system-ui, sans-serif; max-width: 800px; margin: 40px auto; padding: 0 20px; }
+button { margin: 12px 8px 12px 0; padding: 8px 12px; }
+pre { background: #f3f4f6; padding: 16px; white-space: pre-wrap; overflow-wrap: anywhere; }
+</style>
+<h1>Google Sign-In + Lambda Authorizer PoC</h1>
+<p>Google でログインし、取得した ID Token で認証付き API を呼び出します。</p>
+<div id="signin"></div>
+<button id="call" disabled>1つ目の Lambda を呼ぶ</button>
+<button id="secondary" disabled>2つ目の Lambda を呼ぶ</button>
+<button id="anonymous" disabled>1つ目を Token なしで呼ぶ（401 確認）</button>
+<button id="secondary-anonymous" disabled>2つ目を Token なしで呼ぶ（401 確認）</button>
+<button id="copy" disabled>検証用 ID Token をコピー</button>
+<button id="clear">Token を破棄</button>
+<p>ID Token はこのページのメモリ内に保持します。コピーした場合は検証後にクリップボードを消去してください。</p>
+<h2>取得した claims（表示用デコード）</h2>
+<pre id="claims">未ログイン</pre>
+<h2>API 応答</h2>
+<pre id="result" role="status">準備中</pre>
+<script>
+let token = null, config;
+const keys = ['iss', 'aud', 'sub', 'email', 'email_verified', 'iat', 'exp'];
+const result = document.getElementById('result');
+function credentialReceived(response) {
+  try {
+    // GIS credential is an ID Token. No OAuth access token flow is used.
+    const candidate = response.credential;
+    const parts = candidate.split('.');
+    if (parts.length !== 3) throw Error('JWT 形式ではありません');
+    const text = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const payload = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(text.padEnd(Math.ceil(text.length / 4) * 4, '=')), c => c.charCodeAt(0))));
+    if (!keys.every(k => k in payload)) throw Error('必須 claims が不足しています');
+    if (payload.iss !== 'https://accounts.google.com' || payload.aud !== config.google_client_id) throw Error('issuer / audience が一致しません');
+    token = candidate;
+    document.getElementById('claims').textContent = JSON.stringify(Object.fromEntries(keys.map(k => [k, payload[k]])), null, 2);
+    document.getElementById('call').disabled = false;
+    document.getElementById('secondary').disabled = false;
+    document.getElementById('copy').disabled = false;
+    result.textContent = 'ログイン済み。API 呼出しで 1つ目の Lambda による認証・認可を確認してください。';
+  } catch (error) { clearToken(); result.textContent = error.message; }
+}
+function clearToken() {
+  token = null;
+  document.getElementById('call').disabled = true;
+  document.getElementById('secondary').disabled = true;
+  document.getElementById('copy').disabled = true;
+  document.getElementById('claims').textContent = '未ログイン';
+  result.textContent = 'Token を破棄しました';
+}
+async function callApi(authenticated, path = '/private') {
+  try {
+    const response = await fetch(config.api_endpoint + path, {
+      headers: authenticated ? {Authorization: 'Bearer ' + token} : {}, cache: 'no-store', credentials: 'omit'
+    });
+    result.textContent = `HTTP ${response.status}\nRequest ID: ${response.headers.get('apigw-requestid')}\n${await response.text()}`;
+  } catch (_) { result.textContent = 'API に接続できません。API URL、CORS、ネットワークを確認してください。'; }
+}
+document.getElementById('call').onclick = () => callApi(true);
+document.getElementById('secondary').onclick = () => callApi(true, '/secondary');
+document.getElementById('anonymous').onclick = () => callApi(false);
+document.getElementById('secondary-anonymous').onclick = () => callApi(false, '/secondary');
+document.getElementById('clear').onclick = clearToken;
+document.getElementById('copy').onclick = async () => {
+  try { await navigator.clipboard.writeText(token); result.textContent = 'コピー済み。別端末で make test を実行し、非表示プロンプトに貼り付けてください。'; }
+  catch (_) { result.textContent = 'クリップボードへのコピーが許可されていません。ブラウザの権限を確認してください。'; }
+};
+async function initialize() {
+  try {
+    config = await (await fetch('/config.json', {cache: 'no-store'})).json();
+    google.accounts.id.initialize({client_id: config.google_client_id, callback: credentialReceived, auto_select: false});
+    google.accounts.id.renderButton(document.getElementById('signin'), {theme: 'outline', size: 'large'});
+    document.getElementById('anonymous').disabled = false;
+    document.getElementById('secondary-anonymous').disabled = false;
+    result.textContent = 'Google でログインしてください';
+  } catch (_) { result.textContent = 'Google Sign-In を初期化できません。設定、通信、ブラウザ設定を確認してください。'; }
+}
+</script>
+<script src="https://accounts.google.com/gsi/client" async onload="initialize()" onerror="document.getElementById('result').textContent='Google Sign-In の読み込みに失敗しました'"></script>
+</html>
